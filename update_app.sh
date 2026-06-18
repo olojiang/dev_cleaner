@@ -4,7 +4,7 @@ set -euo pipefail
 PRODUCT_NAME="DevCleaner"
 APP_NAME="DevCleaner 纪"
 BUNDLE_ID="com.devcleaner.app"
-APP_VERSION="1.0.1"
+APP_VERSION="1.0.2"
 ICON_FILE="DevCleaner.icns"
 ICON_PATH="Resources/${ICON_FILE}"
 RELEASE_DIR="release"
@@ -14,11 +14,16 @@ APP_PATH="${RELEASE_DIR}/${APP_BUNDLE}"
 INSTALL_DIR="/Applications"
 APPLE_KEYS_DIR="${APPLE_KEYS_DIR:-/Users/hunter/Workspace/apple_keys}"
 NOTARIZE=false
+PACKAGE_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --sign)
             NOTARIZE=true
+            shift
+            ;;
+        --package-only)
+            PACKAGE_ONLY=true
             shift
             ;;
         *)
@@ -245,6 +250,11 @@ create_info_plist
 
 sign_app
 notarize_app
+
+if [[ "${PACKAGE_ONLY}" == true ]]; then
+    echo "✅ Packaged: ${APP_PATH}"
+    exit 0
+fi
 
 echo "🛑 Stopping existing app process..."
 kill_running_app
