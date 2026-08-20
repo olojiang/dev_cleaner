@@ -5,8 +5,8 @@ macOS 原生桌面应用，帮助你批量扫描和清理开发项目中的依�
 ## 功能特性
 
 - **一键扫描** — 选择工作区根目录，自动发现所有开发项目
-- **智能识别** — 通过 `package.json`、`Cargo.toml`、`.git` 等 16 种标识判断项目类型
-- **依赖检测** — 检测 16 种常见依赖/构建产物目录：
+- **智能识别** — 通过 `package.json`、`Cargo.toml`、`.git` 等项目标识判断项目类型，并递归发现工作区分组目录中的项目
+- **依赖检测** — 检测常见依赖、编译产物和缓存目录：
 
   | 类型 | 目录名 | 关联技术 |
   |------|--------|----------|
@@ -21,6 +21,15 @@ macOS 原生桌面应用，帮助你批量扫描和清理开发项目中的依�
   | 依赖供应 | `vendor` | Go / PHP |
   | Dart 工具 | `.dart_tool` / `.pub-cache` | Dart / Flutter |
   | 通用缓存 | `.cache` | 各种工具 |
+  | Swift / CMake 产物 | `.build` / `cmake-build-debug` / `cmake-build-release` | Swift / CMake |
+  | 原生编译产物 | `Carthage/Build` / `.cxx` / `.externalNativeBuild` | Apple / Android |
+  | Bazel 产物 | `bazel-bin` / `bazel-out` / `bazel-testlogs` | Bazel |
+  | 发布产物 | `release` | Electron / macOS / Android 等发布目录 |
+  | 开发缓存 | `Library/Caches` | macOS 开发工具缓存 |
+  | 测试缓存 | `.pytest_cache` / `.mypy_cache` / `.ruff_cache` / `.tox` | Python |
+  | 前端缓存 | `.turbo` / `.parcel-cache` / `.svelte-kit` / `.angular` | 前端工具链 |
+  | 其他产物 | `out` / `bin` / `obj` / `coverage` / `DerivedData` | 多种工具链 |
+  | 本地历史 | `.history` | 编辑器历史快照 |
 
 - **递归扫描** — 深度遍历子目录，找出 monorepo 中嵌套的 node_modules 等
 - **树状展示** — 按项目分组，显示相对路径，支持展开/折叠
@@ -28,6 +37,10 @@ macOS 原生桌面应用，帮助你批量扫描和清理开发项目中的依�
 - **排序功能** — 支持按名称/大小/修改时间排序，正序/逆序切换
 - **批量操作** — 多选、按项目全选、全局全选/取消
 - **安全删除** — 删除前有确认对话框，显示将释放的空间大小
+
+`vendor`、`build`、`dist`、`out`、`release` 等目录可能包含项目源码或发布文件，使用前应确认目录内容；`bin` 仅在明确位于构建目录下时识别，避免误删 Flutter 等工具链源码；符号链接目录不会被扫描或删除。
+
+扫描器按目录名识别可清理项，不会把 `.git` 历史、模型权重、数据库、普通大文件或未知业务数据自动列为可删除项。这些内容会造成“工作区总大小”明显大于可清理总量，删除前应按项目确认。
 
 ## 环境要求
 
@@ -84,8 +97,8 @@ swift build --product DevCleaner
 swift run DevCleanerTests
 ```
 
-测试覆盖三个核心服务（共 23 个测试）：
-- `DirectoryScanner` — 项目识别、递归依赖扫描、相对路径、多语言支持（15 个测试）
+测试覆盖三个核心服务（共 37 个测试）：
+- `DirectoryScanner` — 项目识别、递归依赖扫描、相对路径、多语言支持、发布目录、缓存目录和符号链接安全（23 个测试）
 - `SizeCalculator` — 目录大小递归计算、隐藏文件计算、修改时间（5 个测试）
 - `DependencyCleaner` — 依赖删除与异常处理（3 个测试）
 

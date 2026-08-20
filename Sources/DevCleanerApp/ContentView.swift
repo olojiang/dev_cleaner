@@ -533,6 +533,16 @@ struct ContentView: View {
         case .vendor: return "archivebox.fill"
         case .dartTool, .pubCache: return "cube.fill"
         case .dotCache: return "clock.fill"
+        case .swiftBuild, .out, .bin, .obj, .release, .libraryCaches, .derivedData,
+             .cmakeBuildDebug, .cmakeBuildRelease, .cmakeBuild, .carthageBuild,
+             .bazelBin, .bazelOut, .bazelTestlogs, .cxx, .externalNativeBuild: return "hammer.fill"
+        case .pytestCache, .mypyCache, .ruffCache, .tox: return "memorychip"
+        case .turbo, .parcelCache, .svelteKit, .angularCache, .yarnCache,
+             .pnpmStore, .swiftPM: return "bolt.fill"
+        case .kotlinCache: return "bolt.fill"
+        case .history: return "clock.arrow.circlepath"
+        case .fsCache: return "internaldrive"
+        case .coverage: return "chart.bar.xaxis"
         }
     }
 
@@ -548,6 +558,16 @@ struct ContentView: View {
         case .vendor: return .indigo
         case .dartTool, .pubCache: return .cyan
         case .dotCache: return .gray
+        case .swiftBuild, .out, .bin, .obj, .release, .libraryCaches, .derivedData,
+             .cmakeBuildDebug, .cmakeBuildRelease, .cmakeBuild, .carthageBuild,
+             .bazelBin, .bazelOut, .bazelTestlogs, .cxx, .externalNativeBuild: return .orange
+        case .pytestCache, .mypyCache, .ruffCache, .tox: return .purple
+        case .turbo, .parcelCache, .svelteKit, .angularCache, .yarnCache,
+             .pnpmStore, .swiftPM: return .cyan
+        case .kotlinCache: return .cyan
+        case .history: return .gray
+        case .fsCache: return .secondary
+        case .coverage: return .pink
         }
     }
 

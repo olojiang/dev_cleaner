@@ -130,6 +130,120 @@ TestRunner.run("scanDependencies: finds multiple deps") {
     try assertEqual(deps.count, 3)
 }
 
+TestRunner.run("scanDependencies: finds compiler outputs and test caches") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("build-heavy")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("package.json").path, contents: nil)
+    for name in [".build", ".pytest_cache", "coverage", "out", "cmake-build-debug",
+                 "cmake-build-custom", ".cxx", ".externalNativeBuild", "bazel-bin"] {
+        try fm.createDirectory(at: proj.appendingPathComponent(name), withIntermediateDirectories: true)
+    }
+
+    let scanner = DirectoryScanner()
+    let types = Set(try scanner.scanDependencies(in: proj).map(\.type))
+    try assertTrue(types.contains(.swiftBuild))
+    try assertTrue(types.contains(.pytestCache))
+    try assertTrue(types.contains(.coverage))
+    try assertTrue(types.contains(.out))
+    try assertTrue(types.contains(.cmakeBuildDebug))
+    try assertTrue(types.contains(.cmakeBuild))
+    try assertTrue(types.contains(.cxx))
+    try assertTrue(types.contains(.externalNativeBuild))
+    try assertTrue(types.contains(.bazelBin))
+}
+
+TestRunner.run("scanDependencies: finds release and Library/Caches outputs") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("release-project")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("package.json").path, contents: nil)
+    try fm.createDirectory(at: proj.appendingPathComponent("release/mac-arm64"), withIntermediateDirectories: true)
+    try fm.createDirectory(at: proj.appendingPathComponent("Library/Caches"), withIntermediateDirectories: true)
+
+    let scanner = DirectoryScanner()
+    let deps = try scanner.scanDependencies(in: proj)
+    let paths = Set(deps.map(\.relativePath))
+    try assertTrue(paths.contains("release"))
+    try assertTrue(paths.contains("Library/Caches"))
+}
+
+TestRunner.run("scanDependencies: does not treat source bin as build output") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("source-bin-project")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("Cargo.toml").path, contents: nil)
+    try fm.createDirectory(at: proj.appendingPathComponent("submodules/flutter/bin"), withIntermediateDirectories: true)
+
+    let scanner = DirectoryScanner()
+    let deps = try scanner.scanDependencies(in: proj)
+    try assertFalse(deps.contains { $0.relativePath == "submodules/flutter/bin" })
+}
+
+TestRunner.run("scanDependencies: reaches outputs below common wrapper directories") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("wrapped-outputs")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("package.json").path, contents: nil)
+    try fm.createDirectory(at: proj.appendingPathComponent("android/app/build"), withIntermediateDirectories: true)
+    try fm.createDirectory(at: proj.appendingPathComponent("resources/embedded/node_modules"), withIntermediateDirectories: true)
+    try fm.createDirectory(at: proj.appendingPathComponent("Carthage/Build"), withIntermediateDirectories: true)
+
+    let scanner = DirectoryScanner()
+    let deps = try scanner.scanDependencies(in: proj)
+    let paths = Set(deps.map(\.relativePath))
+    try assertTrue(paths.contains("android/app/build"))
+    try assertTrue(paths.contains("resources/embedded/node_modules"))
+    try assertTrue(paths.contains("Carthage/Build"))
+}
+
+TestRunner.run("scanDependencies: finds known directories below hidden parents") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("hidden-parent")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("pyproject.toml").path, contents: nil)
+    let venv = proj.appendingPathComponent(".claude/skills/example/.venv")
+    try fm.createDirectory(at: venv, withIntermediateDirectories: true)
+
+    let scanner = DirectoryScanner()
+    let deps = try scanner.scanDependencies(in: proj)
+    try assertEqual(deps.count, 1)
+    try assertEqual(deps.first?.relativePath, ".claude/skills/example/.venv")
+}
+
+TestRunner.run("scanDependencies: finds local history snapshots") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("history-project")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("package.json").path, contents: nil)
+    try fm.createDirectory(at: proj.appendingPathComponent(".history"), withIntermediateDirectories: true)
+
+    let scanner = DirectoryScanner()
+    let deps = try scanner.scanDependencies(in: proj)
+    try assertEqual(deps.count, 1)
+    try assertEqual(deps.first?.type, .history)
+}
+
+TestRunner.run("scanDependencies: ignores symlinked dependency directories") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+    let proj = tmp.appendingPathComponent("symlink-project")
+    let external = tmp.appendingPathComponent("external-node-modules")
+    try fm.createDirectory(at: proj, withIntermediateDirectories: true)
+    try fm.createDirectory(at: external, withIntermediateDirectories: true)
+    fm.createFile(atPath: proj.appendingPathComponent("package.json").path, contents: nil)
+    try fm.createSymbolicLink(at: proj.appendingPathComponent("node_modules"), withDestinationURL: external)
+
+    let scanner = DirectoryScanner()
+    try assertTrue(scanner.scanDependencies(in: proj).isEmpty)
+}
+
 TestRunner.run("scanDependencies: RECURSIVE finds nested node_modules") {
     let tmp = makeTempDir()
     defer { cleanUp(tmp) }
@@ -204,6 +318,21 @@ TestRunner.run("scanProjects: returns projects with deps") {
     let names = Set(projects.map(\.name))
     try assertTrue(names.contains("app1"))
     try assertTrue(names.contains("app2"))
+}
+
+TestRunner.run("scanProjects: discovers projects below workspace grouping directories") {
+    let tmp = makeTempDir()
+    defer { cleanUp(tmp) }
+
+    let project = tmp.appendingPathComponent("group/app")
+    try fm.createDirectory(at: project, withIntermediateDirectories: true)
+    fm.createFile(atPath: project.appendingPathComponent("package.json").path, contents: nil)
+    try fm.createDirectory(at: project.appendingPathComponent("node_modules"), withIntermediateDirectories: true)
+
+    let scanner = DirectoryScanner()
+    let projects = try scanner.scanProjects(at: tmp)
+    try assertEqual(projects.count, 1)
+    try assertTrue(projects.first?.path.path.hasSuffix("/group/app") == true)
 }
 
 TestRunner.run("scanProjects: skips projects without deps") {

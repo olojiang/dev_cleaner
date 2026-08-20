@@ -2,6 +2,8 @@ import Foundation
 
 public struct DirectoryScanner: @unchecked Sendable {
     private let fileManager: FileManager
+    private let maxDependencyDepth = 20
+    private let maxProjectDiscoveryDepth = 8
 
     public init(fileManager: FileManager = .default) {
         self.fileManager = fileManager
@@ -67,7 +69,7 @@ public struct DirectoryScanner: @unchecked Sendable {
             projectRoot: resolvedRoot,
             items: &items,
             depth: 0,
-            maxDepth: 10
+            maxDepth: maxDependencyDepth
         )
         return items
     }
@@ -96,9 +98,10 @@ public struct DirectoryScanner: @unchecked Sendable {
             let name = item.lastPathComponent
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: item.path, isDirectory: &isDir),
-                  isDir.boolValue else { continue }
+                  isDir.boolValue,
+                  !isSymbolicLink(item) else { continue }
 
-            if let type = DependencyType(rawValue: name) {
+            if let type = dependencyType(for: item) {
                 let resolvedItem = item.resolvingSymlinksInPath()
                 let relativePath = computeRelativePath(from: projectRoot, to: resolvedItem)
                 let modDate = (try? item.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -108,15 +111,9 @@ public struct DirectoryScanner: @unchecked Sendable {
                     modificationDate: modDate
                 ))
             } else {
-                // Skip hidden directories (other than known ones) and common non-project dirs
-                if name.hasPrefix(".") { continue }
-                if name == "src" || name == "lib" || name == "test" || name == "tests"
-                    || name == "docs" || name == "doc" || name == "examples"
-                    || name == "scripts" || name == "tools" || name == "assets"
-                    || name == "public" || name == "static" || name == "resources"
-                    || name == "app" || name == "pages" || name == "components" {
-                    continue
-                }
+                // Do not walk VCS internals, but allow hidden parent directories such as
+                // .claude to contain a discoverable virtual environment or build directory.
+                if Self.projectDirIndicators.contains(name) { continue }
                 // Recurse into subdirectories (e.g. packages/xxx/node_modules in monorepo)
                 try scanDependenciesRecursive(
                     in: item, projectRoot: projectRoot,
@@ -124,6 +121,47 @@ public struct DirectoryScanner: @unchecked Sendable {
                 )
             }
         }
+    }
+
+    private func isSymbolicLink(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true
+    }
+
+    private func dependencyType(for url: URL) -> DependencyType? {
+        let name = url.lastPathComponent
+        if let type = DependencyType(rawValue: name) {
+            if type == .bin && !isBuildBinDirectory(url) {
+                return nil
+            }
+            return type
+        }
+
+        if name.hasPrefix("cmake-build-") {
+            return .cmakeBuild
+        }
+
+        let parentName = url.deletingLastPathComponent().lastPathComponent
+        if parentName == "Carthage", name == "Build" {
+            return .carthageBuild
+        }
+        if parentName == "Library", name == "Caches" {
+            return .libraryCaches
+        }
+
+        return nil
+    }
+
+    private func isBuildBinDirectory(_ url: URL) -> Bool {
+        let parentName = url.deletingLastPathComponent().lastPathComponent
+        if parentName.hasPrefix("cmake-build-") {
+            return true
+        }
+
+        let buildParents: Set<String> = [
+            "build", ".build", "out", "target", "dist", "DerivedData",
+            "bazel-bin", "bazel-out", ".cxx", ".externalNativeBuild"
+        ]
+        return buildParents.contains(parentName)
     }
 
     private func computeRelativePath(from root: URL, to target: URL) -> String {
@@ -134,22 +172,49 @@ public struct DirectoryScanner: @unchecked Sendable {
     }
 
     public func scanProjects(at rootURL: URL) throws -> [ProjectInfo] {
+        var projects: [ProjectInfo] = []
+        try discoverProjects(
+            in: rootURL.standardizedFileURL,
+            projects: &projects,
+            depth: 0
+        )
+        return projects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func discoverProjects(
+        in directoryURL: URL,
+        projects: inout [ProjectInfo],
+        depth: Int
+    ) throws {
+        guard depth <= maxProjectDiscoveryDepth else { return }
+
         let contents = try fileManager.contentsOfDirectory(
-            at: rootURL, includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsSubdirectoryDescendants, .skipsHiddenFiles]
+            at: directoryURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsSubdirectoryDescendants]
         )
 
-        var projects: [ProjectInfo] = []
         for item in contents {
             var isDir: ObjCBool = false
             guard fileManager.fileExists(atPath: item.path, isDirectory: &isDir),
-                  isDir.boolValue else { continue }
-            guard isProject(at: item) else { continue }
+                  isDir.boolValue,
+                  !isSymbolicLink(item) else { continue }
 
-            let deps = try scanDependencies(in: item)
-            guard !deps.isEmpty else { continue }
-            projects.append(ProjectInfo(path: item, dependencies: deps))
+            let name = item.lastPathComponent
+            if dependencyType(for: item) != nil {
+                continue
+            }
+            if Self.projectDirIndicators.contains(name) { continue }
+
+            if isProject(at: item) {
+                let deps = try scanDependencies(in: item)
+                if !deps.isEmpty {
+                    projects.append(ProjectInfo(path: item, dependencies: deps))
+                }
+                continue
+            }
+
+            try discoverProjects(in: item, projects: &projects, depth: depth + 1)
         }
-        return projects.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
